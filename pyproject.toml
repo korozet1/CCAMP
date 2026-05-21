@@ -1,0 +1,18 @@
+[project]
+name = "ccamp-mcp-scanners"
+version = "0.1.0"
+description = "Local MCP servers and clients for Semgrep, OpenGrep, and SonarQube"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=3.3.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".scannerwork",
+    "__pycache__",
+    "reports",
+]

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -c \"print\\('python works'\\)\")",
+      "Bash(py -3 --version)",
+      "Bash(py -3.11 --version)",
+      "Bash(py -3.12 --version)",
+      "Bash(uv --version)",
+      "Bash(/c/Users/korozet1/AppData/Local/Microsoft/WindowsApps/python.exe *)",
+      "Bash(D:/anaconda3/envs/CCAM/python.exe -c ' *)"
+    ]
+  }
+}

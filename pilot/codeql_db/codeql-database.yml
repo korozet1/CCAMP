@@ -1,0 +1,13 @@
+---
+sourceLocationPrefix: D:\BaiduNetdiskDownload\CCAM\CCAMP\pilot
+baselineLinesOfCode: 1450
+unicodeNewlines: false
+columnKind: utf32
+primaryLanguage: python
+creationMetadata:
+  cliVersion: 2.25.4
+  creationTime: 2026-05-21T03:07:14.878435800Z
+buildMode: none
+overlayDatabase: false
+overlayBaseDatabase: false
+finalised: true
