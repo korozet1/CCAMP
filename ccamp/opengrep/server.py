@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -108,6 +109,76 @@ def has_yaml_rules(path: Path) -> bool:
     return any(path.rglob("*.yaml")) or any(path.rglob("*.yml"))
 
 
+RULE_FILE_SUFFIXES = {".yaml", ".yml"}
+RULE_SCAN_EXCLUDED_DIRS = {
+    ".git",
+    ".github",
+    ".gitlab",
+    "__pycache__",
+    "scripts",
+    "spec",
+    "qa",
+    "test",
+    "tests",
+}
+
+
+def is_rule_yaml_file(path: Path) -> bool:
+    """Return True only for YAML files that look like OpenGrep/Semgrep rules."""
+    if not path.is_file() or path.suffix.lower() not in RULE_FILE_SUFFIXES:
+        return False
+
+    try:
+        lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    except OSError:
+        return False
+
+    return any(line.startswith("rules:") for line in lines)
+
+
+def iter_yaml_files(path: Path) -> list[Path]:
+    """List YAML files under a path while skipping repository/support folders."""
+    if path.is_file():
+        return [path] if path.suffix.lower() in RULE_FILE_SUFFIXES else []
+    if not path.is_dir():
+        return []
+
+    files: list[Path] = []
+    for child in path.iterdir():
+        if child.is_dir():
+            if child.name in RULE_SCAN_EXCLUDED_DIRS:
+                continue
+            files.extend(iter_yaml_files(child))
+        elif child.suffix.lower() in RULE_FILE_SUFFIXES:
+            files.append(child)
+    return files
+
+
+def collect_rule_config_paths(path: Path) -> list[Path]:
+    """Collect safe config paths without including non-rule YAML files."""
+    if path.is_file():
+        return [path] if is_rule_yaml_file(path) else []
+    if not path.is_dir():
+        return []
+
+    yaml_files = iter_yaml_files(path)
+    if not yaml_files:
+        return []
+
+    if all(is_rule_yaml_file(file) for file in yaml_files):
+        return [path]
+
+    configs: list[Path] = []
+    for child in sorted(path.iterdir(), key=lambda item: str(item).lower()):
+        if child.is_dir():
+            if child.name in RULE_SCAN_EXCLUDED_DIRS:
+                continue
+            configs.extend(collect_rule_config_paths(child))
+        elif is_rule_yaml_file(child):
+            configs.append(child)
+    return configs
+
+
 def expand_rule_paths(rule_paths: list[str] | None = None) -> list[Path]:
     """将用户传入的规则路径展开为实际可用的规则目录列表。
 
@@ -166,13 +237,20 @@ def expand_rule_paths(rule_paths: list[str] | None = None) -> list[Path]:
                     expanded.append(child)
             continue
 
-        if has_yaml_rules(path):
-            expanded.append(path)
+        expanded.extend(collect_rule_config_paths(path))
 
     if not expanded:
         raise ValueError("No OpenGrep YAML rule files were found.")
 
-    return expanded
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in expanded:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique.append(path)
+
+    return unique
 
 
 # ============================================================================
@@ -267,8 +345,122 @@ def normalize_result(result: dict[str, Any]) -> dict[str, Any]:
         "likelihood": metadata.get("likelihood"),
         "vulnerability_class": metadata.get("vulnerability_class", []),
         "references": metadata.get("references", []),
-        "lines": result.get("lines"),          # OpenGrep 特有: 问题行内容
-        "fix": extra.get("fix") or result.get("fix"),  # OpenGrep 特有: 修复建议
+        "lines": result.get("lines"),
+        "fix": extra.get("fix") or result.get("fix"),
+    }
+
+
+SEVERITY_SCORE = {
+    "ERROR": 30,
+    "WARNING": 20,
+    "INFO": 10,
+}
+CONFIDENCE_SCORE = {
+    "HIGH": 3,
+    "MEDIUM": 2,
+    "LOW": 1,
+}
+IMPACT_SCORE = {
+    "HIGH": 3,
+    "MEDIUM": 2,
+    "LOW": 1,
+}
+RULE_SOURCE_SCORE = {
+    "opengrep-rules-main": 4,
+    "semgrep-rules": 3,
+    "gitlab-sast-rules": 2,
+    "aikido-opengrep-rules": 1,
+}
+
+
+def rule_source(rule_id: str | None) -> str:
+    """Identify the rule pack that produced a finding."""
+    value = (rule_id or "").lower()
+    if "opengrep-rules-main" in value:
+        return "opengrep-rules-main"
+    if "semgrep-rules" in value:
+        return "semgrep-rules"
+    if "gitlab-sast-rules" in value:
+        return "gitlab-sast-rules"
+    if "aikido-opengrep-rules" in value:
+        return "aikido-opengrep-rules"
+    return "unknown"
+
+
+def normalized_message(message: str | None) -> str:
+    """Normalize messages enough to group duplicate rule-pack hits."""
+    value = (message or "").lower()
+    value = re.sub(r"`[^`]*`|'[^']*'|\"[^\"]*\"", "<value>", value)
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    words = [word for word in value.split() if len(word) > 2]
+    return " ".join(words[:24])
+
+
+def dedupe_key(finding: dict[str, Any]) -> tuple[Any, ...]:
+    """Group repeated hits for the same issue while keeping distinct issues."""
+    return (
+        finding.get("file"),
+        finding.get("start_line"),
+        finding.get("end_line"),
+        normalized_message(finding.get("message")),
+    )
+
+
+def finding_rank(finding: dict[str, Any]) -> tuple[int, int, int, int]:
+    """Choose the most useful representative inside a duplicate group."""
+    return (
+        SEVERITY_SCORE.get(str(finding.get("severity") or "").upper(), 0),
+        CONFIDENCE_SCORE.get(str(finding.get("confidence") or "").upper(), 0),
+        IMPACT_SCORE.get(str(finding.get("impact") or "").upper(), 0),
+        RULE_SOURCE_SCORE.get(rule_source(finding.get("rule_id")), 0),
+    )
+
+
+def deduplicate_findings(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Deduplicate normalized findings and retain source provenance."""
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for finding in findings:
+        groups.setdefault(dedupe_key(finding), []).append(finding)
+
+    deduped: list[dict[str, Any]] = []
+    duplicate_groups = 0
+    removed = 0
+    for group in groups.values():
+        if len(group) > 1:
+            duplicate_groups += 1
+            removed += len(group) - 1
+
+        representative = max(group, key=finding_rank).copy()
+        representative["duplicate_count"] = len(group)
+        representative["duplicate_rule_ids"] = sorted(
+            {
+                item.get("rule_id")
+                for item in group
+                if item.get("rule_id")
+            }
+        )
+        representative["duplicate_sources"] = sorted(
+            {
+                rule_source(item.get("rule_id"))
+                for item in group
+                if item.get("rule_id")
+            }
+        )
+        deduped.append(representative)
+
+    deduped.sort(
+        key=lambda item: (
+            str(item.get("file") or ""),
+            item.get("start_line") or 0,
+            item.get("start_col") or 0,
+            str(item.get("rule_id") or ""),
+        )
+    )
+    return deduped, {
+        "duplicate_groups": duplicate_groups,
+        "duplicate_findings_removed": removed,
     }
 
 
@@ -319,6 +511,7 @@ def scan_project_with_opengrep(
     timeout_seconds: int = 900,
     max_findings: int = 0,
     keep_raw_report: bool = True,
+    deduplicate: bool = True,
     jobs: int | None = None,
     timeout_per_rule: int | None = None,
 ) -> dict[str, Any]:
@@ -380,7 +573,16 @@ def scan_project_with_opengrep(
             shutil.copyfile(output_file, raw_report_path)
 
     raw_results = raw_report.get("results", [])
-    findings = [normalize_result(result) for result in raw_results]
+    raw_findings = [normalize_result(result) for result in raw_results]
+    if deduplicate:
+        findings, dedupe_stats = deduplicate_findings(raw_findings)
+    else:
+        findings = raw_findings
+        dedupe_stats = {
+            "duplicate_groups": 0,
+            "duplicate_findings_removed": 0,
+        }
+
     if max_findings > 0:
         truncated = len(findings) > max_findings
         returned_findings = findings[:max_findings]
@@ -399,6 +601,10 @@ def scan_project_with_opengrep(
         "excludes": DEFAULT_EXCLUDES + (extra_excludes or []),
         "scanned_paths": raw_report.get("paths", {}).get("scanned", []),
         "errors": raw_report.get("errors", []),
+        "raw_total_findings": len(raw_findings),
+        "deduplicated": deduplicate,
+        "duplicate_groups": dedupe_stats["duplicate_groups"],
+        "duplicate_findings_removed": dedupe_stats["duplicate_findings_removed"],
         "total_findings": len(findings),
         "returned_findings": len(returned_findings),
         "truncated": truncated,

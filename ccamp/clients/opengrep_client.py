@@ -17,6 +17,7 @@ from fastmcp import Client
 from ccamp.shared.constants import LOCAL_NO_PROXY
 from ccamp.shared.env import get_required_env, load_project_env
 from ccamp.shared.mcp_client import unwrap_tool_result
+from ccamp.shared.report_schema import normalize_scan_result
 
 
 load_project_env()
@@ -28,7 +29,9 @@ async def run(
     project_path: str,
     mcp_url: str = MCP_URL,
     rule_paths: list[str] | None = None,
+    extra_excludes: list[str] | None = None,
     max_findings: int = 0,
+    deduplicate: bool = True,
     output: str | None = None,
 ) -> None:
     """连接 OpenGrep MCP，列出工具，执行扫描，写结果到文件。"""
@@ -46,14 +49,16 @@ async def run(
         arguments = {
             "project_path": str(project_dir),
             "rule_paths": rule_paths,
+            "extra_excludes": extra_excludes,
             "keep_raw_report": True,
+            "deduplicate": deduplicate,
         }
         if max_findings > 0:
             arguments["max_findings"] = max_findings
 
         result = await client.call_tool("scan_project_with_opengrep", arguments)
 
-    payload = unwrap_tool_result(result)
+    payload = normalize_scan_result(unwrap_tool_result(result))
     output_path = (
         Path(output).resolve()
         if output
@@ -77,10 +82,25 @@ def main() -> None:
         "--rule-path", action="append", dest="rule_paths", default=None
     )
     parser.add_argument(
+        "--exclude",
+        action="append",
+        dest="extra_excludes",
+        default=None,
+        help=(
+            "Additional path or directory name to exclude from OpenGrep. "
+            "Can be used multiple times."
+        ),
+    )
+    parser.add_argument(
         "--max-findings",
         type=int,
         default=0,
         help="Maximum findings to return. Use 0 to return all findings.",
+    )
+    parser.add_argument(
+        "--no-dedupe",
+        action="store_true",
+        help="Return all normalized findings without duplicate grouping.",
     )
     parser.add_argument(
         "--output",
@@ -92,7 +112,15 @@ def main() -> None:
     )
     args = parser.parse_args()
     asyncio.run(
-        run(args.project_path, args.mcp_url, args.rule_paths, args.max_findings, args.output)
+        run(
+            args.project_path,
+            args.mcp_url,
+            args.rule_paths,
+            args.extra_excludes,
+            args.max_findings,
+            not args.no_dedupe,
+            args.output,
+        )
     )
 
 

@@ -13,6 +13,12 @@
 
 本项目已经删除聚合扫描和 AI 报告相关逻辑，不再包含 `run_audit.py`。
 
+扫描器审查方向和适用场景对比见：
+
+```text
+docs\scanner-comparison.md
+```
+
 ## 1. 先理解运行方式
 
 每个扫描器都分成两层：
@@ -400,7 +406,7 @@ cd /d D:\BaiduNetdiskDownload\CCAM\CCAMP\scripts
 | Semgrep | `python -m test_semgrep D:\BaiduNetdiskDownload\CCAM\test` | `reports\semgrep.json`、`reports\semgrep-mcp-result.json` |
 | OpenGrep | `python -m test_opengrep D:\BaiduNetdiskDownload\CCAM\test` | `reports\opengrep.json`、`reports\opengrep-mcp-result.json` |
 | SonarQube | `python -m test_sonar D:\BaiduNetdiskDownload\CCAM\test` | `reports\sonarqube-mcp-result.json` |
-| CodeQL | `python -m test_codeql D:\BaiduNetdiskDownload\CCAM\test` | `reports\codeql-result.csv`、`reports\codeql-mcp-result.json` |
+| CodeQL | `python -m test_codeql D:\BaiduNetdiskDownload\CCAM\test` (python -m test_codeql D:\BaiduNetdiskDownload\fortify\java-sec-code-master --language java --queries D:\BaiduNetdiskDownload\codeql\qlpacks\codeql\java-queries\1.11.2\codeql-suites\java-security-and-quality.qls --timeout-seconds 3600) | `reports\codeql-result.csv`、`reports\codeql-mcp-result.json` |
 
 ### 7.1 Semgrep 常用参数
 

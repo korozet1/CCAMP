@@ -17,6 +17,7 @@ from fastmcp import Client
 from ccamp.shared.constants import LOCAL_NO_PROXY
 from ccamp.shared.env import get_required_env, load_project_env
 from ccamp.shared.mcp_client import unwrap_tool_result
+from ccamp.shared.report_schema import normalize_scan_result
 
 
 load_project_env()
@@ -52,7 +53,7 @@ async def run(
 
         result = await client.call_tool("scan_project_with_semgrep", arguments)
 
-    payload = unwrap_tool_result(result)
+    payload = normalize_scan_result(unwrap_tool_result(result))
     output_path = (
         Path(output).resolve()
         if output

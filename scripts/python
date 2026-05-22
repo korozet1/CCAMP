@@ -1,0 +1,5 @@
+(CCAM) D:\BaiduNetdiskDownload\CCAM\CCAMP\scripts>python -m test_codeql D:\BaiduNetdiskDownload\fortify\java-sec-code-master --language java --queries codeql/java-queries --timeout-seconds 3600
+
+
+
+python -m test_codeql D:\BaiduNetdiskDownload\fortify\java-sec-code-master --language java --queries D:\BaiduNetdiskDownload\codeql\qlpacks\codeql\java-queries\1.11.2\codeql-suites\java-security-and-quality.qls --timeout-seconds 3600

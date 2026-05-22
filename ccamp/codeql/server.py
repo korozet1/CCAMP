@@ -40,6 +40,25 @@ CODEQL_CSV_COLUMNS = [
 ]
 
 
+def configure_maven_path() -> None:
+    maven_bin = os.getenv("MAVEN_BIN")
+    maven_home = os.getenv("MAVEN_HOME")
+    candidate = Path(maven_bin).expanduser() if maven_bin else None
+    if candidate is None and maven_home:
+        candidate = Path(maven_home).expanduser() / "bin"
+
+    if not candidate or not candidate.exists():
+        return
+
+    candidate_text = str(candidate.resolve())
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    if not any(part.lower() == candidate_text.lower() for part in path_parts):
+        os.environ["PATH"] = candidate_text + os.pathsep + os.environ.get("PATH", "")
+
+
+configure_maven_path()
+
+
 def find_codeql_binary() -> str:
     configured = os.getenv("CODEQL_BIN")
     if configured and Path(configured).exists():
